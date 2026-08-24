@@ -36,9 +36,12 @@ module.exports = async function handler(req, res) {
     return res.status(401).send('Unauthorized');
   }
 
-  // User settings updated (includes license changes)
+  // User settings updated
   if (event === 'user.settings_updated') {
     const { email, first_name, last_name } = payload.object;
+
+    // Log full payload to Vercel so we can see what Zoom sends
+    console.log('ZOOM PAYLOAD:', JSON.stringify(parsedBody, null, 2));
 
     await fetch(SLACK_URL, {
       method: 'POST',
@@ -55,7 +58,7 @@ module.exports = async function handler(req, res) {
               { type: 'mrkdwn', text: `*User:*\n${first_name} ${last_name}` },
               { type: 'mrkdwn', text: `*Email:*\n${email}` },
               { type: 'mrkdwn', text: `*Event:*\nSettings / License Updated` },
-              { type: 'mrkdwn', text: `*Account:*\n${payload.account_id}` }
+              { type: 'mrkdwn', text: `*Full Data:*\n\`\`\`${JSON.stringify(payload.object, null, 2)}\`\`\`` }
             ]
           },
           {
