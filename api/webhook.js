@@ -36,9 +36,9 @@ module.exports = async function handler(req, res) {
     return res.status(401).send('Unauthorized');
   }
 
-  // License changed → notify Slack
-  if (event === 'user.license_updated') {
-    const { email, first_name, last_name, old_license, new_license } = payload.object;
+  // User settings updated (includes license changes)
+  if (event === 'user.settings_updated') {
+    const { email, first_name, last_name } = payload.object;
 
     await fetch(SLACK_URL, {
       method: 'POST',
@@ -47,20 +47,25 @@ module.exports = async function handler(req, res) {
         blocks: [
           {
             type: 'header',
-            text: { type: 'plain_text', text: '🔄 Zoom License Changed' }
+            text: { type: 'plain_text', text: '🔄 Zoom User Settings Changed' }
           },
           {
             type: 'section',
             fields: [
               { type: 'mrkdwn', text: `*User:*\n${first_name} ${last_name}` },
               { type: 'mrkdwn', text: `*Email:*\n${email}` },
-              { type: 'mrkdwn', text: `*From:*\n${old_license}` },
-              { type: 'mrkdwn', text: `*To:*\n${new_license}` }
+              { type: 'mrkdwn', text: `*Event:*\nSettings / License Updated` },
+              { type: 'mrkdwn', text: `*Account:*\n${payload.account_id}` }
             ]
           },
           {
             type: 'context',
-            elements: [{ type: 'mrkdwn', text: `Changed at <!date^${Math.floor(event_ts / 1000)}^{date_short_pretty} at {time}|just now>` }]
+            elements: [
+              {
+                type: 'mrkdwn',
+                text: `Updated at <!date^${Math.floor(event_ts / 1000)}^{date_short_pretty} at {time}|just now>`
+              }
+            ]
           }
         ]
       })
