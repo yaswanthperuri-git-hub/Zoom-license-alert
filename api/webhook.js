@@ -24,7 +24,6 @@ module.exports = async function handler(req, res) {
     return res.json({ plainToken: payload.plainToken, encryptedToken: hash });
   }
 
-  // Skip signature check for now
   const userEvents = [
     'user.updated',
     'user.settings_updated',
@@ -34,7 +33,13 @@ module.exports = async function handler(req, res) {
   ];
 
   if (userEvents.includes(event)) {
-    const { email, first_name, last_name } = payload.object;
+    const obj = payload.object;
+
+    // user.updated sends data differently
+    const name = obj.first_name && obj.last_name
+      ? `${obj.first_name} ${obj.last_name}`
+      : obj.display_name || obj.id || 'Unknown User';
+    const email = obj.email || obj.work_email || 'N/A';
 
     console.log('ZOOM EVENT:', event);
     console.log('ZOOM PAYLOAD:', JSON.stringify(parsedBody, null, 2));
@@ -51,10 +56,10 @@ module.exports = async function handler(req, res) {
           {
             type: 'section',
             fields: [
-              { type: 'mrkdwn', text: `*User:*\n${first_name} ${last_name}` },
+              { type: 'mrkdwn', text: `*User:*\n${name}` },
               { type: 'mrkdwn', text: `*Email:*\n${email}` },
               { type: 'mrkdwn', text: `*Event:*\n${event}` },
-              { type: 'mrkdwn', text: `*Data:*\n\`\`\`${JSON.stringify(payload.object, null, 2).slice(0, 300)}\`\`\`` }
+              { type: 'mrkdwn', text: `*Changes:*\n\`\`\`${JSON.stringify(obj.settings || obj, null, 2).slice(0, 300)}\`\`\`` }
             ]
           },
           {
