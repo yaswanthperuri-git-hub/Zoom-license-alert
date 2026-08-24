@@ -11,8 +11,7 @@ module.exports = async function handler(req, res) {
     req.on('end', resolve);
   });
 
-  const rawBody = body;
-  const parsedBody = JSON.parse(rawBody);
+  const parsedBody = JSON.parse(body);
   const { event, payload, event_ts } = parsedBody;
   const ZOOM_SECRET = process.env.ZOOM_SECRET_TOKEN;
 
@@ -25,7 +24,7 @@ module.exports = async function handler(req, res) {
     return res.json({ plainToken: payload.plainToken, encryptedToken: hash });
   }
 
-  // Skip signature check for now — just log and notify
+  // Skip signature check for now
   const userEvents = [
     'user.updated',
     'user.settings_updated',
