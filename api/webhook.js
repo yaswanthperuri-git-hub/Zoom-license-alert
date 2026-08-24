@@ -36,11 +36,19 @@ module.exports = async function handler(req, res) {
     return res.status(401).send('Unauthorized');
   }
 
-  // User settings updated
-  if (event === 'user.settings_updated') {
+  // Catch all user events
+  const userEvents = [
+    'user.updated',
+    'user.settings_updated',
+    'user.activated',
+    'user.deactivated',
+    'user.created'
+  ];
+
+  if (userEvents.includes(event)) {
     const { email, first_name, last_name } = payload.object;
 
-    // Log full payload to Vercel so we can see what Zoom sends
+    console.log('ZOOM EVENT:', event);
     console.log('ZOOM PAYLOAD:', JSON.stringify(parsedBody, null, 2));
 
     await fetch(SLACK_URL, {
@@ -50,15 +58,15 @@ module.exports = async function handler(req, res) {
         blocks: [
           {
             type: 'header',
-            text: { type: 'plain_text', text: '🔄 Zoom User Settings Changed' }
+            text: { type: 'plain_text', text: '🔄 Zoom User Changed' }
           },
           {
             type: 'section',
             fields: [
               { type: 'mrkdwn', text: `*User:*\n${first_name} ${last_name}` },
               { type: 'mrkdwn', text: `*Email:*\n${email}` },
-              { type: 'mrkdwn', text: `*Event:*\nSettings / License Updated` },
-              { type: 'mrkdwn', text: `*Full Data:*\n\`\`\`${JSON.stringify(payload.object, null, 2)}\`\`\`` }
+              { type: 'mrkdwn', text: `*Event Type:*\n${event}` },
+              { type: 'mrkdwn', text: `*Data:*\n\`\`\`${JSON.stringify(payload.object, null, 2).slice(0, 200)}\`\`\`` }
             ]
           },
           {
@@ -66,7 +74,7 @@ module.exports = async function handler(req, res) {
             elements: [
               {
                 type: 'mrkdwn',
-                text: `Updated at <!date^${Math.floor(event_ts / 1000)}^{date_short_pretty} at {time}|just now>`
+                text: `Triggered at <!date^${Math.floor(event_ts / 1000)}^{date_short_pretty} at {time}|just now>`
               }
             ]
           }
