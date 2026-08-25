@@ -59,50 +59,35 @@ module.exports = async function handler(req, res) {
     const name = `${userData.first_name} ${userData.last_name}`;
     const email = userData.email;
 
-    // Build message
+    // Build ONE clean message
     const settings = obj.settings?.feature || obj.settings || obj;
-    const messages = [];
 
+    const isAddingLargeMeeting = settings.large_meeting === true;
     const isRemovingLargeMeeting = settings.large_meeting === false;
+    const isAddingWebinar = settings.webinar === true;
     const isRemovingWebinar = settings.webinar === false;
-    const largeMeetingCapacity = settings.large_meeting_capacity || settings.meeting_capacity || '';
+    const isAddingZoomPhone = settings.zoom_phone === true;
+    const isRemovingZoomPhone = settings.zoom_phone === false;
 
-    for (const [key, value] of Object.entries(settings)) {
-      if (key === 'large_meeting') {
-        messages.push(value
-          ? `Large Meeting license (${largeMeetingCapacity} capacity) has been added`
-          : `Large Meeting license (${largeMeetingCapacity} capacity) has been removed`
-        );
-      } else if (key === 'large_meeting_capacity') {
-        if (!isRemovingLargeMeeting) {
-          messages.push(`Large Meeting capacity updated to ${value}`);
-        }
-      } else if (key === 'meeting_capacity') {
-        if (isRemovingLargeMeeting) {
-          // skip
-        } else if (value === 300 && messages.length === 0) {
-          messages.push(`No license has been mapped`);
-        } else {
-          messages.push(`Meeting capacity updated to ${value}`);
-        }
-      } else if (key === 'webinar') {
-        const webinarCapacity = settings.webinar_capacity || '';
-        messages.push(value
-          ? `Webinar license (${webinarCapacity} capacity) has been added`
-          : `Webinar license (${webinarCapacity} capacity) has been removed`
-        );
-      } else if (key === 'webinar_capacity') {
-        if (!isRemovingWebinar) {
-          messages.push(`Webinar capacity updated to ${value}`);
-        }
-      } else if (key === 'zoom_phone') {
-        messages.push(value
-          ? `Zoom Phone license has been added`
-          : `Zoom Phone license has been removed`
-        );
-      } else {
-        messages.push(`${key} updated to ${value}`);
-      }
+    const largeMeetingCapacity = settings.large_meeting_capacity || '';
+    const webinarCapacity = settings.webinar_capacity || '';
+
+    let updateText = '';
+
+    if (isAddingLargeMeeting) {
+      updateText = `Large Meeting license (${largeMeetingCapacity} capacity) has been added`;
+    } else if (isRemovingLargeMeeting) {
+      updateText = `Large Meeting license has been removed. No license has been mapped`;
+    } else if (isAddingWebinar) {
+      updateText = `Webinar license (${webinarCapacity} capacity) has been added`;
+    } else if (isRemovingWebinar) {
+      updateText = `Webinar license has been removed. No license has been mapped`;
+    } else if (isAddingZoomPhone) {
+      updateText = `Zoom Phone license has been added`;
+    } else if (isRemovingZoomPhone) {
+      updateText = `Zoom Phone license has been removed. No license has been mapped`;
+    } else {
+      updateText = `No license has been mapped`;
     }
 
     // Time in IST
@@ -116,10 +101,6 @@ module.exports = async function handler(req, res) {
       minute: '2-digit',
       hour12: true
     });
-
-    const updateText = messages.length > 0
-      ? messages.join('\n')
-      : 'No license has been mapped';
 
     await fetch(SLACK_URL, {
       method: 'POST',
