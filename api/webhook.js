@@ -4,6 +4,10 @@ module.exports = async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).send('Method Not Allowed');
 
   const SLACK_URL = process.env.SLACK_WEBHOOK_URL;
+  const ZOOM_SECRET = process.env.ZOOM_SECRET_TOKEN;
+  const ZOOM_ACCOUNT_ID = process.env.ZOOM_ACCOUNT_ID;
+  const ZOOM_CLIENT_ID = process.env.ZOOM_CLIENT_ID;
+  const ZOOM_CLIENT_SECRET = process.env.ZOOM_CLIENT_SECRET;
 
   let body = '';
   await new Promise((resolve) => {
@@ -13,7 +17,6 @@ module.exports = async function handler(req, res) {
 
   const parsedBody = JSON.parse(body);
   const { event, payload, event_ts } = parsedBody;
-  const ZOOM_SECRET = process.env.ZOOM_SECRET_TOKEN;
 
   // Zoom URL verification handshake
   if (event === 'endpoint.url_validation') {
@@ -34,15 +37,41 @@ module.exports = async function handler(req, res) {
 
   if (userEvents.includes(event)) {
     const obj = payload.object;
+    const userId = obj.id;
 
-    // user.updated sends data differently
-    const name = obj.first_name && obj.last_name
-      ? `${obj.first_name} ${obj.last_name}`
-      : obj.display_name || obj.id || 'Unknown User';
-    const email = obj.email || obj.work_email || 'N/A';
+    // Get Zoom access token
+    const tokenRes = await fetch(`https://zoom.us/oauth/token?grant_type=account_credentials&account_id=${ZOOM_ACCOUNT_ID}`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${Buffer.from(`${ZOOM_CLIENT_ID}:${ZOOM_CLIENT_SECRET}`).toString('base64')}`,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      }
+    });
+    const tokenData = await tokenRes.json();
+    const accessToken = tokenData.access_token;
+
+    // Fetch user details from Zoom API
+    const userRes = await fetch(`https://api.zoom.us/v2/users/${userId}`, {
+      headers: { 'Authorization': `Bearer ${accessToken}` }
+    });
+    const userData = await userRes.json();
+
+    const name = `${userData.first_name} ${userData.last_name}`;
+    const email = userData.email;
+
+    // Format what changed
+    const changes = obj.settings
+      ? Object.entries(obj.settings).map(([key, val]) => {
+          if (typeof val === 'object') {
+            return Object.entries(val).map(([k, v]) => `• ${k}: ${v}`).join('\n');
+          }
+          return `• ${key}: ${val}`;
+        }).join('\n')
+      : JSON.stringify(obj, null, 2).slice(0, 300);
 
     console.log('ZOOM EVENT:', event);
-    console.log('ZOOM PAYLOAD:', JSON.stringify(parsedBody, null, 2));
+    console.log('USER:', name, email);
+    console.log('CHANGES:', changes);
 
     await fetch(SLACK_URL, {
       method: 'POST',
@@ -51,23 +80,29 @@ module.exports = async function handler(req, res) {
         blocks: [
           {
             type: 'header',
-            text: { type: 'plain_text', text: '🔄 Zoom User Changed' }
+            text: { type: 'plain_text', text: '🔄 Zoom User Updated' }
           },
           {
             type: 'section',
             fields: [
-              { type: 'mrkdwn', text: `*User:*\n${name}` },
-              { type: 'mrkdwn', text: `*Email:*\n${email}` },
-              { type: 'mrkdwn', text: `*Event:*\n${event}` },
-              { type: 'mrkdwn', text: `*Changes:*\n\`\`\`${JSON.stringify(obj.settings || obj, null, 2).slice(0, 300)}\`\`\`` }
+              { type: 'mrkdwn', text: `*👤 User:*\n${name}` },
+              { type: 'mrkdwn', text: `*📧 Email:*\n${email}` }
             ]
+          },
+          {
+            type: 'section',
+            text: { type: 'mrkdwn', text: `*🔁 Event:*\n${event}` }
+          },
+          {
+            type: 'section',
+            text: { type: 'mrkdwn', text: `*📝 What Changed:*\n${changes}` }
           },
           {
             type: 'context',
             elements: [
               {
                 type: 'mrkdwn',
-                text: `Triggered at <!date^${Math.floor(event_ts / 1000)}^{date_short_pretty} at {time}|just now>`
+                text: `⏱ Triggered at <!date^${Math.floor(event_ts / 1000)}^{date_short_pretty} at {time}|just now>`
               }
             ]
           }
