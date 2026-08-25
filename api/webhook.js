@@ -50,7 +50,7 @@ module.exports = async function handler(req, res) {
     const tokenData = await tokenRes.json();
     const accessToken = tokenData.access_token;
 
-    // Fetch user details from Zoom API
+    // Fetch user details
     const userRes = await fetch(`https://api.zoom.us/v2/users/${userId}`, {
       headers: { 'Authorization': `Bearer ${accessToken}` }
     });
@@ -59,19 +59,46 @@ module.exports = async function handler(req, res) {
     const name = `${userData.first_name} ${userData.last_name}`;
     const email = userData.email;
 
-    // Format what changed
-    const changes = obj.settings
-      ? Object.entries(obj.settings).map(([key, val]) => {
-          if (typeof val === 'object') {
-            return Object.entries(val).map(([k, v]) => `• ${k}: ${v}`).join('\n');
-          }
-          return `• ${key}: ${val}`;
-        }).join('\n')
-      : JSON.stringify(obj, null, 2).slice(0, 300);
+    // Build one line message
+    const settings = obj.settings?.feature || obj.settings || obj;
+    const messages = [];
 
-    console.log('ZOOM EVENT:', event);
-    console.log('USER:', name, email);
-    console.log('CHANGES:', changes);
+    for (const [key, value] of Object.entries(settings)) {
+      if (key === 'meeting_capacity') {
+        messages.push(`Meeting capacity changed to ${value}`);
+      } else if (key === 'large_meeting') {
+        messages.push(value
+          ? `Large Meeting license has been added`
+          : `Large Meeting license has been removed`
+        );
+      } else if (key === 'large_meeting_capacity') {
+        messages.push(`Large Meeting capacity changed to ${value}`);
+      } else if (key === 'webinar') {
+        messages.push(value
+          ? `Webinar license has been added`
+          : `Webinar license has been removed`
+        );
+      } else if (key === 'webinar_capacity') {
+        messages.push(`Webinar capacity changed to ${value}`);
+      } else if (key === 'zoom_phone') {
+        messages.push(value
+          ? `Zoom Phone license has been added`
+          : `Zoom Phone license has been removed`
+        );
+      } else {
+        messages.push(`${key} changed to ${value}`);
+      }
+    }
+
+    // Format date
+    const date = new Date(event_ts);
+    const timeStr = date.toLocaleString('en-US', {
+      month: 'short', day: 'numeric',
+      year: 'numeric', hour: 'numeric',
+      minute: '2-digit', hour12: true
+    });
+
+    const messageText = messages.join(', ') + ` — ${timeStr}`;
 
     await fetch(SLACK_URL, {
       method: 'POST',
@@ -79,32 +106,11 @@ module.exports = async function handler(req, res) {
       body: JSON.stringify({
         blocks: [
           {
-            type: 'header',
-            text: { type: 'plain_text', text: '🔄 Zoom User Updated' }
-          },
-          {
             type: 'section',
-            fields: [
-              { type: 'mrkdwn', text: `*👤 User:*\n${name}` },
-              { type: 'mrkdwn', text: `*📧 Email:*\n${email}` }
-            ]
-          },
-          {
-            type: 'section',
-            text: { type: 'mrkdwn', text: `*🔁 Event:*\n${event}` }
-          },
-          {
-            type: 'section',
-            text: { type: 'mrkdwn', text: `*📝 What Changed:*\n${changes}` }
-          },
-          {
-            type: 'context',
-            elements: [
-              {
-                type: 'mrkdwn',
-                text: `⏱ Triggered at <!date^${Math.floor(event_ts / 1000)}^{date_short_pretty} at {time}|just now>`
-              }
-            ]
+            text: {
+              type: 'mrkdwn',
+              text: `🔄 *Zoom License Changed*\n*Name:* ${name}\n*Email:* ${email}\n*Message:* ${messageText}`
+            }
           }
         ]
       })
