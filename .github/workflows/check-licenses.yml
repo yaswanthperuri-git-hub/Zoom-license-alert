@@ -1,0 +1,14 @@
+name: Check Zoom Licenses
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+jobs:
+  check-licenses:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Zoom Licenses
+        run: |
+          curl -X GET https://zoom-license-alert.vercel.app/api/cron
