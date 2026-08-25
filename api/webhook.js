@@ -59,43 +59,47 @@ module.exports = async function handler(req, res) {
     const name = `${userData.first_name} ${userData.last_name}`;
     const email = userData.email;
 
-    // Build one line message
+    // Build message
     const settings = obj.settings?.feature || obj.settings || obj;
     const messages = [];
 
     for (const [key, value] of Object.entries(settings)) {
-      if (key === 'meeting_capacity') {
-        messages.push(`Meeting capacity changed to ${value}`);
-      } else if (key === 'large_meeting') {
+      if (key === 'large_meeting') {
         messages.push(value
           ? `Large Meeting license has been added`
           : `Large Meeting license has been removed`
         );
       } else if (key === 'large_meeting_capacity') {
-        messages.push(`Large Meeting capacity changed to ${value}`);
+        messages.push(`Large Meeting capacity updated to ${value}`);
+      } else if (key === 'meeting_capacity') {
+        messages.push(`Meeting capacity updated to ${value}`);
       } else if (key === 'webinar') {
         messages.push(value
           ? `Webinar license has been added`
           : `Webinar license has been removed`
         );
       } else if (key === 'webinar_capacity') {
-        messages.push(`Webinar capacity changed to ${value}`);
+        messages.push(`Webinar capacity updated to ${value}`);
       } else if (key === 'zoom_phone') {
         messages.push(value
           ? `Zoom Phone license has been added`
           : `Zoom Phone license has been removed`
         );
       } else {
-        messages.push(`${key} changed to ${value}`);
+        messages.push(`${key} updated to ${value}`);
       }
     }
 
-    // Format date
+    // Time in IST
     const date = new Date(event_ts);
-    const timeStr = date.toLocaleString('en-US', {
-      month: 'short', day: 'numeric',
-      year: 'numeric', hour: 'numeric',
-      minute: '2-digit', hour12: true
+    const timeStr = date.toLocaleString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true
     });
 
     const messageText = messages.join(', ') + ` — ${timeStr}`;
@@ -109,7 +113,7 @@ module.exports = async function handler(req, res) {
             type: 'section',
             text: {
               type: 'mrkdwn',
-              text: `🔄 *Zoom License Changed*\n*Name:* ${name}\n*Email:* ${email}\n*Message:* ${messageText}`
+              text: `<!here> 🔄 *Zoom License Changed*\n*Name:* ${name}\n*Email:* ${email}\n*Message:* ${messageText}`
             }
           }
         ]
