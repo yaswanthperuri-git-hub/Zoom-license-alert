@@ -63,23 +63,38 @@ module.exports = async function handler(req, res) {
     const settings = obj.settings?.feature || obj.settings || obj;
     const messages = [];
 
+    const isRemovingLargeMeeting = settings.large_meeting === false;
+    const isRemovingWebinar = settings.webinar === false;
+    const largeMeetingCapacity = settings.large_meeting_capacity || settings.meeting_capacity || '';
+
     for (const [key, value] of Object.entries(settings)) {
       if (key === 'large_meeting') {
         messages.push(value
-          ? `Large Meeting license has been added`
-          : `Large Meeting license has been removed`
+          ? `Large Meeting license (${largeMeetingCapacity} capacity) has been added`
+          : `Large Meeting license (${largeMeetingCapacity} capacity) has been removed`
         );
       } else if (key === 'large_meeting_capacity') {
-        messages.push(`Large Meeting capacity updated to ${value}`);
+        if (!isRemovingLargeMeeting) {
+          messages.push(`Large Meeting capacity updated to ${value}`);
+        }
       } else if (key === 'meeting_capacity') {
-        messages.push(`Meeting capacity updated to ${value}`);
+        if (isRemovingLargeMeeting) {
+          // skip
+        } else if (value === 300 && messages.length === 0) {
+          messages.push(`No license has been mapped`);
+        } else {
+          messages.push(`Meeting capacity updated to ${value}`);
+        }
       } else if (key === 'webinar') {
+        const webinarCapacity = settings.webinar_capacity || '';
         messages.push(value
-          ? `Webinar license has been added`
-          : `Webinar license has been removed`
+          ? `Webinar license (${webinarCapacity} capacity) has been added`
+          : `Webinar license (${webinarCapacity} capacity) has been removed`
         );
       } else if (key === 'webinar_capacity') {
-        messages.push(`Webinar capacity updated to ${value}`);
+        if (!isRemovingWebinar) {
+          messages.push(`Webinar capacity updated to ${value}`);
+        }
       } else if (key === 'zoom_phone') {
         messages.push(value
           ? `Zoom Phone license has been added`
@@ -102,7 +117,9 @@ module.exports = async function handler(req, res) {
       hour12: true
     });
 
-    const messageText = messages.join(', ') + ` — ${timeStr}`;
+    const updateText = messages.length > 0
+      ? messages.join('\n')
+      : 'No license has been mapped';
 
     await fetch(SLACK_URL, {
       method: 'POST',
@@ -113,7 +130,7 @@ module.exports = async function handler(req, res) {
             type: 'section',
             text: {
               type: 'mrkdwn',
-              text: `<!here> 🔄 *Zoom License Changed*\n*Name:* ${name}\n*Email:* ${email}\n*Message:* ${messageText}`
+              text: `<!here> *Zoom License Changed*\n*Account Name:* ${name}\n*Account Email:* ${email}\n*Update:* ${updateText}\n*Time:* ${timeStr}`
             }
           }
         ]
