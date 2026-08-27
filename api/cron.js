@@ -34,10 +34,24 @@ async function getAllUsers(token) {
 }
 
 async function getUserDetails(token, userId) {
-  const res = await fetch(`https://api.zoom.us/v2/users/${userId}`, {
-    headers: { 'Authorization': `Bearer ${token}` }
-  });
-  const user = await res.json();
+  const [userRes, addonsRes] = await Promise.all([
+    fetch(`https://api.zoom.us/v2/users/${userId}`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    }),
+    fetch(`https://api.zoom.us/v2/users/${userId}/addons`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
+  ]);
+
+  const user = await userRes.json();
+  const addons = await addonsRes.json();
+
+  if (user.email === 'priyatam@outskill.com') {
+    console.log(`FULL RAW for ${user.email}:`, JSON.stringify(user));
+    console.log(`ADDONS for ${user.email}:`, JSON.stringify(addons));
+  }
+
+  user.addons_data = addons;
   return user;
 }
 
@@ -116,18 +130,32 @@ module.exports = async function handler(req, res) {
       const email = details.email;
       const name = `${details.first_name} ${details.last_name}`;
 
-      // Log FULL raw response for priyatam only to debug
-      if (email === 'priyatam@outskill.com') {
-        console.log(`FULL RAW for ${email}:`, JSON.stringify(details));
-      }
+      // Build snapshot with addons
+      const addonsList = details.addons_data?.addons || [];
+      const hasWebinar = addonsList.some(a =>
+        a.name?.toLowerCase().includes('webinar') ||
+        a.type?.toLowerCase().includes('webinar')
+      );
+      const hasLargeMeeting = addonsList.some(a =>
+        a.name?.toLowerCase().includes('large meeting') ||
+        a.type?.toLowerCase().includes('large_meeting')
+      );
+      const webinarAddon = addonsList.find(a =>
+        a.name?.toLowerCase().includes('webinar')
+      );
+      const webinarCapacity = webinarAddon?.attendees_capacity || 0;
 
       const current = {
-        large_meeting: details.feature?.large_meeting === true,
+        type: details.type || 0,
+        large_meeting: details.feature?.large_meeting === true || hasLargeMeeting,
         large_meeting_capacity: details.feature?.large_meeting_capacity || 0,
-        webinar: details.feature?.webinar === true,
-        webinar_capacity: details.feature?.webinar_capacity || 0,
-        zoom_phone: details.feature?.zoom_phone === true
+        webinar: details.feature?.webinar === true || hasWebinar,
+        webinar_capacity: details.feature?.webinar_capacity || webinarCapacity || 0,
+        zoom_phone: details.feature?.zoom_phone === true,
+        addons_raw: JSON.stringify(addonsList)
       };
+
+      console.log(`${email}: type=${current.type} webinar=${current.webinar} large_meeting=${current.large_meeting} addons=${current.addons_raw}`);
 
       const key = `zoom_user_${user.id}`;
       const previous = await redisGet(key);
@@ -135,12 +163,20 @@ module.exports = async function handler(req, res) {
       if (previous) {
         const changes = [];
 
+        // Check license type change
+        if (previous.type !== current.type) {
+          const typeNames = { 1: 'Basic', 2: 'Licensed', 3: 'On-prem' };
+          changes.push(`Zoom license changed from ${typeNames[previous.type] || previous.type} to ${typeNames[current.type] || current.type}`);
+        }
+
+        // Check large meeting
         if (previous.large_meeting === true && current.large_meeting === false) {
           changes.push(`Large Meeting license has been removed. No license has been mapped`);
         } else if (previous.large_meeting === false && current.large_meeting === true) {
           changes.push(`Large Meeting license (${current.large_meeting_capacity} capacity) has been added`);
         }
 
+        // Check webinar
         if (previous.webinar === true && current.webinar === false) {
           changes.push(`Webinar license has been removed. No license has been mapped`);
         } else if (previous.webinar === false && current.webinar === true) {
@@ -151,10 +187,18 @@ module.exports = async function handler(req, res) {
           changes.push(`Webinar capacity changed from ${previous.webinar_capacity} to ${current.webinar_capacity}`);
         }
 
+        // Check zoom phone
         if (previous.zoom_phone === true && current.zoom_phone === false) {
           changes.push(`Zoom Phone license has been removed. No license has been mapped`);
         } else if (previous.zoom_phone === false && current.zoom_phone === true) {
           changes.push(`Zoom Phone license has been added`);
+        }
+
+        // Check addons changed
+        if (previous.addons_raw !== current.addons_raw) {
+          console.log(`Addons changed for ${email}`);
+          console.log(`Previous addons: ${previous.addons_raw}`);
+          console.log(`Current addons: ${current.addons_raw}`);
         }
 
         if (changes.length > 0) {
