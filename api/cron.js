@@ -14,14 +14,12 @@ async function getZoomToken() {
     }
   });
   const data = await res.json();
-  console.log('Zoom token fetched:', data.access_token ? 'OK' : 'FAILED');
   return data.access_token;
 }
 
 async function getAllUsers(token) {
   let users = [];
   let nextPageToken = '';
-
   do {
     const url = `https://api.zoom.us/v2/users?page_size=300&status=active${nextPageToken ? `&next_page_token=${nextPageToken}` : ''}`;
     const res = await fetch(url, {
@@ -31,7 +29,6 @@ async function getAllUsers(token) {
     users = users.concat(data.users || []);
     nextPageToken = data.next_page_token || '';
   } while (nextPageToken);
-
   console.log(`Total users fetched: ${users.length}`);
   return users;
 }
@@ -49,7 +46,6 @@ async function redisGet(key) {
       headers: { 'Authorization': `Bearer ${UPSTASH_TOKEN}` }
     });
     const data = await res.json();
-    console.log(`Redis get [${key}]:`, data.result ? 'found' : 'not found');
     return data.result ? JSON.parse(data.result) : null;
   } catch (e) {
     console.log('Redis get error:', e.message);
@@ -59,18 +55,16 @@ async function redisGet(key) {
 
 async function redisSet(key, value) {
   try {
-    const encoded = encodeURIComponent(key);
-    const stringValue = JSON.stringify(value);
-    const res = await fetch(`${UPSTASH_URL}/set/${encoded}`, {
+    const res = await fetch(`${UPSTASH_URL}/set/${encodeURIComponent(key)}`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${UPSTASH_TOKEN}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify(stringValue)
+      body: JSON.stringify(JSON.stringify(value))
     });
     const data = await res.json();
-    console.log(`Redis set [${key}]:`, data.result);
+    console.log(`Redis set [${key}]: ${data.result}`);
   } catch (e) {
     console.log('Redis set error:', e.message);
   }
@@ -102,7 +96,6 @@ async function sendSlackAlert(name, email, updateText) {
       ]
     })
   });
-
   console.log('Slack alert sent for:', email);
 }
 
@@ -112,7 +105,6 @@ module.exports = async function handler(req, res) {
     const token = await getZoomToken();
 
     if (!token) {
-      console.log('No token — check Zoom credentials');
       return res.status(500).send('Token error');
     }
 
@@ -123,16 +115,13 @@ module.exports = async function handler(req, res) {
       const email = details.email;
       const name = `${details.first_name} ${details.last_name}`;
 
-      // Current license snapshot
       const current = {
-        large_meeting: details.feature?.large_meeting || false,
+        large_meeting: details.feature?.large_meeting === true,
         large_meeting_capacity: details.feature?.large_meeting_capacity || 0,
-        webinar: details.feature?.webinar || false,
+        webinar: details.feature?.webinar === true,
         webinar_capacity: details.feature?.webinar_capacity || 0,
-        zoom_phone: details.feature?.zoom_phone || false
+        zoom_phone: details.feature?.zoom_phone === true
       };
-
-      console.log(`User: ${email} | webinar: ${current.webinar} | large_meeting: ${current.large_meeting}`);
 
       const key = `zoom_user_${user.id}`;
       const previous = await redisGet(key);
@@ -140,42 +129,39 @@ module.exports = async function handler(req, res) {
       if (previous) {
         const changes = [];
 
-        if (previous.large_meeting !== current.large_meeting) {
-          changes.push(current.large_meeting
-            ? `Large Meeting license (${current.large_meeting_capacity} capacity) has been added`
-            : `Large Meeting license has been removed. No license has been mapped`
-          );
+        // Only alert if license status actually changed
+        if (previous.large_meeting === true && current.large_meeting === false) {
+          changes.push(`Large Meeting license has been removed. No license has been mapped`);
+        } else if (previous.large_meeting === false && current.large_meeting === true) {
+          changes.push(`Large Meeting license (${current.large_meeting_capacity} capacity) has been added`);
         }
 
-        if (previous.webinar !== current.webinar) {
-          changes.push(current.webinar
-            ? `Webinar license (${current.webinar_capacity} capacity) has been added`
-            : `Webinar license has been removed. No license has been mapped`
-          );
+        if (previous.webinar === true && current.webinar === false) {
+          changes.push(`Webinar license has been removed. No license has been mapped`);
+        } else if (previous.webinar === false && current.webinar === true) {
+          changes.push(`Webinar license (${current.webinar_capacity} capacity) has been added`);
         }
 
-        if (previous.webinar && current.webinar && previous.webinar_capacity !== current.webinar_capacity) {
+        if (previous.webinar === true && current.webinar === true && previous.webinar_capacity !== current.webinar_capacity) {
           changes.push(`Webinar capacity changed from ${previous.webinar_capacity} to ${current.webinar_capacity}`);
         }
 
-        if (previous.zoom_phone !== current.zoom_phone) {
-          changes.push(current.zoom_phone
-            ? `Zoom Phone license has been added`
-            : `Zoom Phone license has been removed. No license has been mapped`
-          );
+        if (previous.zoom_phone === true && current.zoom_phone === false) {
+          changes.push(`Zoom Phone license has been removed. No license has been mapped`);
+        } else if (previous.zoom_phone === false && current.zoom_phone === true) {
+          changes.push(`Zoom Phone license has been added`);
         }
 
         if (changes.length > 0) {
-          console.log(`Changes detected for ${email}:`, changes);
+          console.log(`Changes for ${email}:`, changes);
           await sendSlackAlert(name, email, changes.join('\n'));
         } else {
           console.log(`No changes for ${email}`);
         }
       } else {
-        console.log(`First run for ${email} — saving snapshot only, no alert`);
+        console.log(`First run for ${email} — saving snapshot`);
       }
 
-      // Save current snapshot
       await redisSet(key, current);
     }
 
