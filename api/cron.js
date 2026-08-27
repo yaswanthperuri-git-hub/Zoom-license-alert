@@ -42,16 +42,9 @@ async function getUserDetails(token, userId) {
       headers: { 'Authorization': `Bearer ${token}` }
     })
   ]);
-
   const user = await userRes.json();
   const addons = await addonsRes.json();
-
-  if (user.email === 'priyatam@outskill.com') {
-    console.log(`FULL RAW for ${user.email}:`, JSON.stringify(user));
-    console.log(`ADDONS for ${user.email}:`, JSON.stringify(addons));
-  }
-
-  user.addons_data = addons;
+  user.addons_data = addons?.addons || [];
   return user;
 }
 
@@ -63,7 +56,6 @@ async function redisGet(key) {
     const data = await res.json();
     return data.result ? JSON.parse(data.result) : null;
   } catch (e) {
-    console.log('Redis get error:', e.message);
     return null;
   }
 }
@@ -118,10 +110,7 @@ module.exports = async function handler(req, res) {
   try {
     console.log('Cron started');
     const token = await getZoomToken();
-
-    if (!token) {
-      return res.status(500).send('Token error');
-    }
+    if (!token) return res.status(500).send('Token error');
 
     const users = await getAllUsers(token);
 
@@ -129,83 +118,66 @@ module.exports = async function handler(req, res) {
       const details = await getUserDetails(token, user.id);
       const email = details.email;
       const name = `${details.first_name} ${details.last_name}`;
+      const addons = details.addons_data || [];
 
-      // Build snapshot with addons
-      const addonsList = details.addons_data?.addons || [];
-      const hasWebinar = addonsList.some(a =>
+      // Extract webinar info from addons
+      const webinarAddon = addons.find(a =>
         a.name?.toLowerCase().includes('webinar') ||
-        a.type?.toLowerCase().includes('webinar')
+        a.label?.toLowerCase().includes('webinar')
       );
-      const hasLargeMeeting = addonsList.some(a =>
-        a.name?.toLowerCase().includes('large meeting') ||
-        a.type?.toLowerCase().includes('large_meeting')
+      const largeMeetingAddon = addons.find(a =>
+        a.name?.toLowerCase().includes('large') ||
+        a.label?.toLowerCase().includes('large')
       );
-      const webinarAddon = addonsList.find(a =>
-        a.name?.toLowerCase().includes('webinar')
-      );
-      const webinarCapacity = webinarAddon?.attendees_capacity || 0;
 
       const current = {
-        type: details.type || 0,
-        large_meeting: details.feature?.large_meeting === true || hasLargeMeeting,
-        large_meeting_capacity: details.feature?.large_meeting_capacity || 0,
-        webinar: details.feature?.webinar === true || hasWebinar,
-        webinar_capacity: details.feature?.webinar_capacity || webinarCapacity || 0,
-        zoom_phone: details.feature?.zoom_phone === true,
-        addons_raw: JSON.stringify(addonsList)
+        webinar: !!webinarAddon,
+        webinar_name: webinarAddon?.name || webinarAddon?.label || '',
+        large_meeting: !!largeMeetingAddon,
+        large_meeting_name: largeMeetingAddon?.name || largeMeetingAddon?.label || '',
+        addons_snapshot: JSON.stringify(addons.map(a => a.name || a.label || a.id).sort())
       };
 
-      console.log(`${email}: type=${current.type} webinar=${current.webinar} large_meeting=${current.large_meeting} addons=${current.addons_raw}`);
+      console.log(`${email}: webinar=${current.webinar} large=${current.large_meeting} addons=${current.addons_snapshot}`);
 
       const key = `zoom_user_${user.id}`;
       const previous = await redisGet(key);
 
       if (previous) {
-        const changes = [];
-
-        // Check license type change
-        if (previous.type !== current.type) {
-          const typeNames = { 1: 'Basic', 2: 'Licensed', 3: 'On-prem' };
-          changes.push(`Zoom license changed from ${typeNames[previous.type] || previous.type} to ${typeNames[current.type] || current.type}`);
-        }
-
-        // Check large meeting
-        if (previous.large_meeting === true && current.large_meeting === false) {
-          changes.push(`Large Meeting license has been removed. No license has been mapped`);
-        } else if (previous.large_meeting === false && current.large_meeting === true) {
-          changes.push(`Large Meeting license (${current.large_meeting_capacity} capacity) has been added`);
-        }
-
-        // Check webinar
-        if (previous.webinar === true && current.webinar === false) {
-          changes.push(`Webinar license has been removed. No license has been mapped`);
-        } else if (previous.webinar === false && current.webinar === true) {
-          changes.push(`Webinar license (${current.webinar_capacity} capacity) has been added`);
-        }
-
-        if (previous.webinar === true && current.webinar === true && previous.webinar_capacity !== current.webinar_capacity) {
-          changes.push(`Webinar capacity changed from ${previous.webinar_capacity} to ${current.webinar_capacity}`);
-        }
-
-        // Check zoom phone
-        if (previous.zoom_phone === true && current.zoom_phone === false) {
-          changes.push(`Zoom Phone license has been removed. No license has been mapped`);
-        } else if (previous.zoom_phone === false && current.zoom_phone === true) {
-          changes.push(`Zoom Phone license has been added`);
-        }
-
-        // Check addons changed
-        if (previous.addons_raw !== current.addons_raw) {
-          console.log(`Addons changed for ${email}`);
-          console.log(`Previous addons: ${previous.addons_raw}`);
-          console.log(`Current addons: ${current.addons_raw}`);
-        }
-
-        if (changes.length > 0) {
-          console.log(`Changes for ${email}:`, changes);
-          await sendSlackAlert(name, email, changes.join('\n'));
-        } else {
+        // Only compare addons_snapshot — ignore everything else
+        if (previous.addons_snapshot === current.addons_snapshot) {
           console.log(`No changes for ${email}`);
+        } else {
+          console.log(`Changes detected for ${email}`);
+          const changes = [];
+
+          // Webinar check
+          if (!previous.webinar && current.webinar) {
+            changes.push(`Webinar license (${current.webinar_name}) has been added`);
+          } else if (previous.webinar && !current.webinar) {
+            changes.push(`Webinar license has been removed. No license has been mapped`);
+          }
+
+          // Large meeting check
+          if (!previous.large_meeting && current.large_meeting) {
+            changes.push(`Large Meeting license (${current.large_meeting_name}) has been added`);
+          } else if (previous.large_meeting && !current.large_meeting) {
+            changes.push(`Large Meeting license has been removed. No license has been mapped`);
+          }
+
+          // Fallback if specific type not detected
+          if (changes.length === 0) {
+            const prev = JSON.parse(previous.addons_snapshot);
+            const curr = JSON.parse(current.addons_snapshot);
+            const added = curr.filter(a => !prev.includes(a));
+            const removed = prev.filter(a => !curr.includes(a));
+            if (added.length > 0) changes.push(`License added: ${added.join(', ')}`);
+            if (removed.length > 0) changes.push(`License removed: ${removed.join(', ')}`);
+          }
+
+          if (changes.length > 0) {
+            await sendSlackAlert(name, email, changes.join('\n'));
+          }
         }
       } else {
         console.log(`First run for ${email} — saving snapshot`);
