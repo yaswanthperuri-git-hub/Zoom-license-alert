@@ -115,12 +115,18 @@ module.exports = async function handler(req, res) {
       const email = details.email;
       const name = `${details.first_name} ${details.last_name}`;
 
+      // Log raw data to find correct fields
+      console.log(`Raw feature for ${email}:`, JSON.stringify(details.feature || {}));
+      console.log(`Raw addons for ${email}:`, JSON.stringify(details.addons || []));
+
       const current = {
         large_meeting: details.feature?.large_meeting === true,
         large_meeting_capacity: details.feature?.large_meeting_capacity || 0,
         webinar: details.feature?.webinar === true,
         webinar_capacity: details.feature?.webinar_capacity || 0,
-        zoom_phone: details.feature?.zoom_phone === true
+        zoom_phone: details.feature?.zoom_phone === true,
+        // Also track addons array
+        addons: JSON.stringify(details.addons || [])
       };
 
       const key = `zoom_user_${user.id}`;
@@ -129,7 +135,6 @@ module.exports = async function handler(req, res) {
       if (previous) {
         const changes = [];
 
-        // Only alert if license status actually changed
         if (previous.large_meeting === true && current.large_meeting === false) {
           changes.push(`Large Meeting license has been removed. No license has been mapped`);
         } else if (previous.large_meeting === false && current.large_meeting === true) {
@@ -150,6 +155,12 @@ module.exports = async function handler(req, res) {
           changes.push(`Zoom Phone license has been removed. No license has been mapped`);
         } else if (previous.zoom_phone === false && current.zoom_phone === true) {
           changes.push(`Zoom Phone license has been added`);
+        }
+
+        // Check addons change
+        if (previous.addons !== current.addons) {
+          console.log(`Addons changed for ${email}: ${previous.addons} → ${current.addons}`);
+          changes.push(`License add-on changed`);
         }
 
         if (changes.length > 0) {
