@@ -34,18 +34,10 @@ async function getAllUsers(token) {
 }
 
 async function getUserDetails(token, userId) {
-  const [userRes, settingsRes] = await Promise.all([
-    fetch(`https://api.zoom.us/v2/users/${userId}`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    }),
-    fetch(`https://api.zoom.us/v2/users/${userId}/settings`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    })
-  ]);
-
-  const user = await userRes.json();
-  const settings = await settingsRes.json();
-  user.settings = settings;
+  const res = await fetch(`https://api.zoom.us/v2/users/${userId}`, {
+    headers: { 'Authorization': `Bearer ${token}` }
+  });
+  const user = await res.json();
   return user;
 }
 
@@ -124,20 +116,18 @@ module.exports = async function handler(req, res) {
       const email = details.email;
       const name = `${details.first_name} ${details.last_name}`;
 
-      // Log all possible fields to find the right one
-      console.log(`Feature for ${email}:`, JSON.stringify(details.feature || {}));
-      console.log(`Settings.feature for ${email}:`, JSON.stringify(details.settings?.feature || {}));
-      console.log(`Plan type for ${email}:`, details.plan_united_type || 'N/A');
+      // Log FULL raw response for priyatam only to debug
+      if (email === 'priyatam@outskill.com') {
+        console.log(`FULL RAW for ${email}:`, JSON.stringify(details));
+      }
 
       const current = {
-        large_meeting: details.feature?.large_meeting === true || details.settings?.feature?.large_meeting === true,
-        large_meeting_capacity: details.feature?.large_meeting_capacity || details.settings?.feature?.large_meeting_capacity || 0,
-        webinar: details.feature?.webinar === true || details.settings?.feature?.webinar === true,
-        webinar_capacity: details.feature?.webinar_capacity || details.settings?.feature?.webinar_capacity || 0,
-        zoom_phone: details.feature?.zoom_phone === true || details.settings?.feature?.zoom_phone === true
+        large_meeting: details.feature?.large_meeting === true,
+        large_meeting_capacity: details.feature?.large_meeting_capacity || 0,
+        webinar: details.feature?.webinar === true,
+        webinar_capacity: details.feature?.webinar_capacity || 0,
+        zoom_phone: details.feature?.zoom_phone === true
       };
-
-      console.log(`Current for ${email}: webinar=${current.webinar} large_meeting=${current.large_meeting}`);
 
       const key = `zoom_user_${user.id}`;
       const previous = await redisGet(key);
