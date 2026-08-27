@@ -45,10 +45,11 @@ async function getUserDetails(token, userId) {
 
 async function redisGet(key) {
   try {
-    const res = await fetch(`${UPSTASH_URL}/get/${key}`, {
+    const res = await fetch(`${UPSTASH_URL}/get/${encodeURIComponent(key)}`, {
       headers: { 'Authorization': `Bearer ${UPSTASH_TOKEN}` }
     });
     const data = await res.json();
+    console.log(`Redis get [${key}]:`, data.result ? 'found' : 'not found');
     return data.result ? JSON.parse(data.result) : null;
   } catch (e) {
     console.log('Redis get error:', e.message);
@@ -58,16 +59,18 @@ async function redisGet(key) {
 
 async function redisSet(key, value) {
   try {
-    const res = await fetch(`${UPSTASH_URL}/set/${key}`, {
+    const encoded = encodeURIComponent(key);
+    const stringValue = JSON.stringify(value);
+    const res = await fetch(`${UPSTASH_URL}/set/${encoded}`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${UPSTASH_TOKEN}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify(value)
+      body: JSON.stringify(stringValue)
     });
     const data = await res.json();
-    console.log('Redis set result:', data.result);
+    console.log(`Redis set [${key}]:`, data.result);
   } catch (e) {
     console.log('Redis set error:', e.message);
   }
@@ -131,44 +134,35 @@ module.exports = async function handler(req, res) {
 
       console.log(`User: ${email} | webinar: ${current.webinar} | large_meeting: ${current.large_meeting}`);
 
-      // Get previous snapshot
       const key = `zoom_user_${user.id}`;
       const previous = await redisGet(key);
 
       if (previous) {
-        console.log(`Previous for ${email}: webinar: ${previous.webinar} | large_meeting: ${previous.large_meeting}`);
         const changes = [];
 
-        // Check large meeting
         if (previous.large_meeting !== current.large_meeting) {
-          if (current.large_meeting) {
-            changes.push(`Large Meeting license (${current.large_meeting_capacity} capacity) has been added`);
-          } else {
-            changes.push(`Large Meeting license has been removed. No license has been mapped`);
-          }
+          changes.push(current.large_meeting
+            ? `Large Meeting license (${current.large_meeting_capacity} capacity) has been added`
+            : `Large Meeting license has been removed. No license has been mapped`
+          );
         }
 
-        // Check webinar
         if (previous.webinar !== current.webinar) {
-          if (current.webinar) {
-            changes.push(`Webinar license (${current.webinar_capacity} capacity) has been added`);
-          } else {
-            changes.push(`Webinar license has been removed. No license has been mapped`);
-          }
+          changes.push(current.webinar
+            ? `Webinar license (${current.webinar_capacity} capacity) has been added`
+            : `Webinar license has been removed. No license has been mapped`
+          );
         }
 
-        // Check webinar capacity change
         if (previous.webinar && current.webinar && previous.webinar_capacity !== current.webinar_capacity) {
           changes.push(`Webinar capacity changed from ${previous.webinar_capacity} to ${current.webinar_capacity}`);
         }
 
-        // Check zoom phone
         if (previous.zoom_phone !== current.zoom_phone) {
-          if (current.zoom_phone) {
-            changes.push(`Zoom Phone license has been added`);
-          } else {
-            changes.push(`Zoom Phone license has been removed. No license has been mapped`);
-          }
+          changes.push(current.zoom_phone
+            ? `Zoom Phone license has been added`
+            : `Zoom Phone license has been removed. No license has been mapped`
+          );
         }
 
         if (changes.length > 0) {
@@ -178,11 +172,11 @@ module.exports = async function handler(req, res) {
           console.log(`No changes for ${email}`);
         }
       } else {
-        console.log(`First run for ${email} — saving snapshot`);
+        console.log(`First run for ${email} — saving snapshot only, no alert`);
       }
 
       // Save current snapshot
-      await redisSet(key, JSON.stringify(current));
+      await redisSet(key, current);
     }
 
     console.log('Cron completed');
