@@ -14,6 +14,7 @@ async function getZoomToken() {
     }
   });
   const data = await res.json();
+  console.log('Zoom token fetched:', data.access_token ? 'OK' : 'FAILED');
   return data.access_token;
 }
 
@@ -31,6 +32,7 @@ async function getAllUsers(token) {
     nextPageToken = data.next_page_token || '';
   } while (nextPageToken);
 
+  console.log(`Total users fetched: ${users.length}`);
   return users;
 }
 
@@ -48,20 +50,27 @@ async function redisGet(key) {
     });
     const data = await res.json();
     return data.result ? JSON.parse(data.result) : null;
-  } catch {
+  } catch (e) {
+    console.log('Redis get error:', e.message);
     return null;
   }
 }
 
 async function redisSet(key, value) {
-  await fetch(`${UPSTASH_URL}/set/${key}`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${UPSTASH_TOKEN}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(value)
-  });
+  try {
+    const res = await fetch(`${UPSTASH_URL}/set/${key}`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${UPSTASH_TOKEN}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(value)
+    });
+    const data = await res.json();
+    console.log('Redis set result:', data.result);
+  } catch (e) {
+    console.log('Redis set error:', e.message);
+  }
 }
 
 async function sendSlackAlert(name, email, updateText) {
@@ -90,11 +99,20 @@ async function sendSlackAlert(name, email, updateText) {
       ]
     })
   });
+
+  console.log('Slack alert sent for:', email);
 }
 
 module.exports = async function handler(req, res) {
   try {
+    console.log('Cron started');
     const token = await getZoomToken();
+
+    if (!token) {
+      console.log('No token — check Zoom credentials');
+      return res.status(500).send('Token error');
+    }
+
     const users = await getAllUsers(token);
 
     for (const user of users) {
@@ -111,11 +129,14 @@ module.exports = async function handler(req, res) {
         zoom_phone: details.feature?.zoom_phone || false
       };
 
+      console.log(`User: ${email} | webinar: ${current.webinar} | large_meeting: ${current.large_meeting}`);
+
       // Get previous snapshot
       const key = `zoom_user_${user.id}`;
       const previous = await redisGet(key);
 
       if (previous) {
+        console.log(`Previous for ${email}: webinar: ${previous.webinar} | large_meeting: ${previous.large_meeting}`);
         const changes = [];
 
         // Check large meeting
@@ -150,16 +171,21 @@ module.exports = async function handler(req, res) {
           }
         }
 
-        // Send alert if anything changed
         if (changes.length > 0) {
+          console.log(`Changes detected for ${email}:`, changes);
           await sendSlackAlert(name, email, changes.join('\n'));
+        } else {
+          console.log(`No changes for ${email}`);
         }
+      } else {
+        console.log(`First run for ${email} — saving snapshot`);
       }
 
       // Save current snapshot
       await redisSet(key, JSON.stringify(current));
     }
 
+    console.log('Cron completed');
     res.status(200).send('Cron completed');
   } catch (err) {
     console.error('Cron error:', err);
